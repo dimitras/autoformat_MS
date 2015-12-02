@@ -1,5 +1,5 @@
 # USAGE:
-# ruby ms_autoformat.rb input/enrichr_GO_tables_for_filtered_genes.xlsx output/filtered_GO_tables_for_filtered2.xlsx "creatinine"
+# ruby ms_autoformat.rb input/raw_data/ input/15Oct05KTheken_Study18_MU_MP\ samples\ volumes.xlsx  input/15Oct05_Creat_KT_Study18_MU\(124\).xlsx "creatinine"
 
 require 'rubygems'
 require 'csv'
