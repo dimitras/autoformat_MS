@@ -1,5 +1,5 @@
 # USAGE:
-# ruby ms_autoformat.rb input/raw_data/ input/15Oct05KTheken_Study18_MU_MP\ samples\ volumes.xlsx  input/15Oct05_Creat_KT_Study18_MU\(124\).xlsx "creatinine"
+# ruby ms_autoformat.rb test2/ VOLUMES.xlsx CONTROL.xlsx "creatinine"
 
 require 'rubygems'
 require 'csv'
@@ -22,6 +22,7 @@ compounds = {}
 Dir["#{mydir}*.txt"].each do |ifile|
 	# puts ifile
 	filename = nil
+	# exec(dos2unix ifile)
 	txt_rows = File.readlines(ifile, {:col_sep => "\t"})
 	CSV.open("#{ifile}.csv", 'wb') do |csv|
 		filename = ifile.split("/")[-1].split(".txt")[0]
@@ -36,7 +37,9 @@ Dir["#{mydir}*.txt"].each do |ifile|
 	in_even_compound = false
 	compound_num = nil
 	compound_name = nil
+	fields = {}
 	CSV.foreach("#{ifile}.csv") do |row|
+
 		if !row[0].nil? && row[0].start_with?("Compound")
 			compound_num = row[0].split(" ")[1].split(":")[0]
 			compound_name = row[0].split(":")[1]
@@ -50,23 +53,23 @@ Dir["#{mydir}*.txt"].each do |ifile|
 				next
 			end
 		end
-
-		if in_even_compound == true 
-			if row[2] && !dict_list.has_key?(row[2])
-				if row[2] == "Name"
-					next
-				elsif row[0] != ""
-					# puts row.inspect
-					# dict_list[row[2]] << [compound_name, row[4], row[6..7]]
-					dict_list[compound_name] << [row[2], row[4], row[6..7]]
+		
+		if in_even_compound == true
+			if row[1] && row[1] == "Name"
+				for i in 1..row.length-1
+					if row[i] == "Name"
+						fields["Name"] = i
+					elsif row[i] == "Area"
+						fields["Area"] = i
+					elsif row[i] == "IS Area"
+						fields["IS Area"] = i
+					elsif row[i] == "Std. Conc"
+						fields["Std. Conc"] = i
+					end
 				end
-			elsif row[2] && dict_list.has_key?(row[2])
-				if row[2] == "Name"
-					next
-				elsif row[0] != ""
-					# puts row.inspect
-					dict_list[compound_name] << [row[2], row[4], row[6..7]]
-				end
+				next
+			elsif (row[0] != "")
+				dict_list[compound_name] << [row[fields["Name"]], row[fields["Area"]], row[fields["IS Area"]], row[fields["Std. Conc"]]]
 			end
 		elsif in_even_compound == false
 			next
@@ -81,15 +84,25 @@ end
 # end
 
 
-# read the volume lists (format: IT MaT ID	Sample	Treatment	Analytes 	volumes(ml)	IT MaT ID	Sample	Treatment	Analytes 	volumes(ml))
+# read the volumes list (format: ID	Sample	Volume(ml)	Treatment	Analytes)
+# eg: 1	220-4 0.1	none	DM,EM,IM,Tx,6k
 workbook = RubyXL::Parser.parse(vols_file)
 volumes = {}
+sample_names = {}
+treatments = {}
 worksheet1 = workbook[0]
 worksheet1.each do |row|
 	if row && row.cells
-		if row[0] && (row[0].value != "IT MaT ID")
-			volumes[row[0].value] = row[4].value if row[4]
-			volumes[row[5].value] = row[9].value if row[5] && row[9]
+		if row[0] && (row[0].value != "ID*")
+			if !row[2].value
+				next
+			else
+				id = row[0].value.to_s
+				key_id = id.gsub(/[^\d]/,'')
+				volumes[key_id] = row[2].value
+				sample_names[key_id] = row[1].value
+				treatments[key_id] = row[3].value if row[3]
+			end
 		end
 	end
 end
@@ -101,27 +114,40 @@ end
 indicator_volumes = Hash.new { |h,k| h[k] = [] }
 indicator_samples = Hash.new { |h,k| h[k] = [] }
 if set_indicator == true
-	# read the indicator list (format: Filename	Area	ISTD Area	Area Ratio	Sample ID	Treatment	Sample Volume (mL)	Spike (ng)	ng/ml	mg/dl ) 
-	# keep cols: 0,4,9
+	# read the indicator list (format: ID - Filename	- Area - ISTD Area - Area Ratio - Sample ID - Treatment	- Sample Volume (mL) - Spike (ng) - ng/ml	- mg/dl)
+	# eg: 001 15Oct05_Creat_KT_Study18_MU_001	4,146,988	6,805,456	0.609	220-4 urine 1	none	0.010	2,500	152340.55	15.23 
+	# keep cols: 0,4,9,5
 	workbook = RubyXL::Parser.parse(indicator_file)
 	worksheet = workbook[0]
 	in_data = false
 	worksheet.each do |row|
 		if row && row.cells
-			if row[0] && (row[0].value == "Filename")
-				in_data = true
-				next
-			elsif row[4] && (row[4].value == "Sample ID")
+			if row[0] && (row[0].value == "ID*")
 				in_data = true
 				next
 			end
-			if in_data == true && row[0]
-				indicator_volumes[row[0].value] = [row[4].value, row[9].value, row[5].value] if row[4] && row[9] && row[5]
-				indicator_samples[row[0].value.split("_")[-1].gsub(/[^0-9]/i, '')] = row[0].value
+
+			if in_data == true && row[0] #&& row[9].value
+				values = {}
+				for i in 1..8
+					if row[i].nil?
+						value = ""
+					else
+						value = row[i].value
+					end
+					values["row#{i}"] = value
+				end	
+				if (!values["row4"].nil? && !values["row8"].nil? && !values["row7"].nil?)
+					ng_ml = values["row4"] * values["row8"] / values["row7"]
+					mg_dl = (ng_ml * 100 / 1000000)
+					indicator_volumes[row[0].value] = [row[0].value, mg_dl.round(2), values["row1"]]
+				else
+					indicator_volumes[row[0].value] = [row[0].value, values["row7"], values["row1"]]
+				end
+				indicator_samples[row[0].value] = row[0].value
 			end
 		end
 	end
-
 	# indicator_volumes.each_key do |key|
 	# 	puts "#{key} = #{indicator_volumes[key].join(",")}"
 	# 	# 15Oct05_Creat_KT_Study18_MU_124 = 231-3 urine 4,9.2568380893374, High-salt+celecoxib 
@@ -130,12 +156,11 @@ if set_indicator == true
 	# 	puts "#{key} = #{indicator_samples[key]}"
 	# 	# 124 = 15Oct05_Creat_KT_Study18_MU_124
 	# end
-
 end
 
 
 # output
-ofile = "results.xlsx"
+ofile = "#{mydir}/data.xlsx"
 results_xlsx = Axlsx::Package.new
 results_wb = results_xlsx.workbook
 title = results_wb.styles.add_style(:b => true, :alignment=>{:horizontal => :center})
@@ -163,52 +188,51 @@ dict_list.each_key do |compound|
 		dict_list[compound].each do |sample_arr|
 			vol = ""
 			fname = sample_arr[0]
-			sample = fname.split("_")[-1].to_i
-			spike = sample_arr[1].to_f
+			sample = fname.split("_")[-1].gsub(/[^\d]/,'')
+
+			if sample.start_with? "0"
+				sample = sample.sub(/^[0]*/,'')
+			end
+			spike = sample_arr[3].to_f
 			if volumes.has_key?(sample)
 				vol = volumes[sample].to_f
 			else
 				vol = ""
 			end
 
-			if bias_set == false && sample == 0 #RC
+			if bias_set == false && sample.to_i == 0 #RC
 				bias_set = true
-				if sample_arr[2][0]!="" && sample_arr[2][1]!=""
-					e_area = sample_arr[2][0].to_f
-					s_area = sample_arr[2][1].to_f
-					bias = (e_area/s_area)
+				if sample_arr[1]!="" && sample_arr[2]!=""
+					e_area = sample_arr[1].to_f
+					s_area = sample_arr[2].to_f
+					bias = (e_area/s_area).round(5)
 				else
-					s_area = sample_arr[2][1]
+					s_area = sample_arr[2]
 					e_area = ""
 					bias = 0
 				end
 				endo_spike_ratio = bias
 				f_vol = ""
-				# puts vol
-				sheet.add_row [sample, fname, spike, vol, e_area, s_area, endo_spike_ratio.round(5), f_vol], :style => data
+				sheet.add_row [sample, fname, spike, vol, e_area, s_area, endo_spike_ratio, f_vol], :style => data
 				next
 			end
-# puts vol			
+			
 			if bias_set == true && sample != "RC"
-				# puts vol
-				if sample_arr[2][0]!="" && sample_arr[2][1]!=""
-					e_area = sample_arr[2][0].to_f
-					s_area = sample_arr[2][1].to_f
+				if sample_arr[1]!="" && sample_arr[2]!=""
+					e_area = sample_arr[1].to_f
+					s_area = sample_arr[2].to_f
 					endo_spike_ratio = ((e_area/s_area)-bias)
 					if vol != "" && vol && !vol.nil?
-						# puts "IN"
-						f_vol = ((spike * endo_spike_ratio) / vol)
-						# puts f_vol
+						f_vol = ((spike * endo_spike_ratio) / vol).round(2)
 					end
-
+					endo_spike_ratio = endo_spike_ratio.round(5)
 				else
-					s_area = sample_arr[2][1]
+					s_area = sample_arr[2]
 					e_area = ""
 					endo_spike_ratio = 0
 					f_vol = 0
 				end
-				# puts f_vol
-				sheet.add_row [sample, fname, spike, vol, e_area, s_area, endo_spike_ratio.round(5), f_vol.round(2)], :style => data
+				sheet.add_row [sample, fname, spike, vol, e_area, s_area, endo_spike_ratio, f_vol], :style => data
 				vols_list[fname] << f_vol
 				sample_list[fname] << sample
 			end
@@ -236,10 +260,10 @@ else
 end
 
 vols_list.each_key do |fname|
-	fname_id = fname.split("_")[-1].gsub(/[^0-9]/i, '')
+	fname_id = fname.split("_")[-1].gsub(/[^0-9]/i, '').sub(/^[0]*/,'').to_i
 	if set_indicator == true && indicator_samples.has_key?(fname_id) 
-		indicator_vol = indicator_volumes[indicator_samples[fname_id]][1]
-		summary_sheet.add_row [sample_list[fname][0], fname, vols_list[fname].map { |i| i.round(2) }, indicator_vol.round(2), vols_list[fname].map { |i| (i*100/indicator_vol).round(2) }].flatten, :style => data
+		indicator_vol = indicator_volumes[fname_id][1]
+		summary_sheet.add_row [sample_list[fname][0], sample_names[fname_id.to_s], vols_list[fname].map { |i| i.round(2) }, indicator_vol.round(2), vols_list[fname].map { |i| (i*100/indicator_vol).round(2) }].flatten, :style => data
 		vols_list[fname].each do |i|
 			if (i*100/indicator_vol) < 0
 				final_vol = "BLQ"
@@ -249,7 +273,7 @@ vols_list.each_key do |fname|
 			new_vols_with_indic[sample_list[fname][0]] << final_vol
 		end
 	else
-		summary_sheet.add_row [sample_list[fname][0], fname, vols_list[fname].map { |i| i.round(2) }].flatten, :style => data
+		summary_sheet.add_row [sample_list[fname][0], sample_names[fname_id], vols_list[fname].map { |i| i.round(2) }].flatten, :style => data
 	end
 end
 
@@ -259,13 +283,11 @@ if set_indicator == true
 	final_sheet = results_wb.add_worksheet(:name => "Final")
 	final_sheet.add_row ["","","",(0..compounds.keys.size-1).map{|i| "ng/ml #{indicator}"}].flatten, :style => title
 	final_sheet.merge_cells final_sheet.rows.first.cells[(3..3+compounds.keys.size-1)]
-	final_sheet.add_row ["Sample","ID","Treatment",dict_list.keys].flatten, :style => title, :widths => [:auto]
+	final_sheet.add_row ["Sample #","ID","Treatment",dict_list.keys].flatten, :style => title, :widths => [:auto]
 
 	new_vols_with_indic.each_key do |sample|
-		sample_3pos = sprintf '%03d', sample
-		# if indicator_samples.has_key?(sample) 
-			final_sheet.add_row [sample, indicator_volumes[indicator_samples[sample_3pos]][0], indicator_volumes[indicator_samples[sample_3pos]][2], new_vols_with_indic[sample].map { |i| i }].flatten, :style => data
-		# end
+		# sample_3pos = sprintf '%03d', sample
+		final_sheet.add_row [sample, sample_names[sample], treatments[sample], new_vols_with_indic[sample].map { |i| i }].flatten, :style => data
 	end
 end
 
