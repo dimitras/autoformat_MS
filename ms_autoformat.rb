@@ -22,7 +22,7 @@ compounds = {}
 Dir["#{mydir}*.txt"].each do |ifile|
 	# puts ifile
 	filename = nil
-	# exec(dos2unix ifile)
+	# system 'dos2unix #{ifile}'
 	txt_rows = File.readlines(ifile, {:col_sep => "\t"})
 	CSV.open("#{ifile}.csv", 'wb') do |csv|
 		filename = ifile.split("/")[-1].split(".txt")[0]
@@ -168,7 +168,7 @@ data = results_wb.styles.add_style(:alignment=>{:horizontal => :left})
 
 # create compound sheets
 raw_files.each_key do |raw_file|
-	results_wb.add_worksheet(:name => "Raw_#{raw_file}") do |sheet|
+	results_wb.add_worksheet(:name => "#{raw_file}") do |sheet|
 		raw_files[raw_file].each do |row|
 			sheet.add_row row
 		end
@@ -178,6 +178,7 @@ end
 
 vols_list = Hash.new { |h,k| h[k] = [] }
 sample_list = Hash.new { |h,k| h[k] = [] }
+fnames_by_sample = {}
 dict_list.each_key do |compound|
 	results_wb.add_worksheet(:name => compound) do |sheet|
 		sheet.add_row ["Sample #","File Name","Spike (ng)","Vol (ml)","Endogenous Area","Spike Area","Endog/Spike","ng/ml"], :style => title
@@ -188,19 +189,22 @@ dict_list.each_key do |compound|
 		dict_list[compound].each do |sample_arr|
 			vol = ""
 			fname = sample_arr[0]
-			sample = fname.split("_")[-1].gsub(/[^\d]/,'')
-
+			sample = fname.split("_")[-1]
+			if !sample.include? "RC"
+				sample = sample.gsub(/[^\d]/,'')
+			end
 			if sample.start_with? "0"
 				sample = sample.sub(/^[0]*/,'')
 			end
 			spike = sample_arr[3].to_f
+
 			if volumes.has_key?(sample)
 				vol = volumes[sample].to_f
 			else
 				vol = ""
 			end
 
-			if bias_set == false && sample.to_i == 0 #RC
+			if bias_set == false && (sample.include? "RC")
 				bias_set = true
 				if sample_arr[1]!="" && sample_arr[2]!=""
 					e_area = sample_arr[1].to_f
@@ -217,15 +221,16 @@ dict_list.each_key do |compound|
 				next
 			end
 			
-			if bias_set == true && sample != "RC"
+			if bias_set == true && (!sample.include? "RC")
 				if sample_arr[1]!="" && sample_arr[2]!=""
 					e_area = sample_arr[1].to_f
 					s_area = sample_arr[2].to_f
-					endo_spike_ratio = ((e_area/s_area)-bias)
+					endo_spike_ratio = e_area/(s_area-bias)
 					if vol != "" && vol && !vol.nil?
 						f_vol = ((spike * endo_spike_ratio) / vol).round(2)
 					end
 					endo_spike_ratio = endo_spike_ratio.round(5)
+					p sample if f_vol.nil?
 				else
 					s_area = sample_arr[2]
 					e_area = ""
@@ -235,11 +240,11 @@ dict_list.each_key do |compound|
 				sheet.add_row [sample, fname, spike, vol, e_area, s_area, endo_spike_ratio, f_vol], :style => data
 				vols_list[fname] << f_vol
 				sample_list[fname] << sample
+				fnames_by_sample[sample] = fname
 			end
 		end
 	end
 end
-
 
 # create summary table with all compound vols
 stop1 = 2+compounds.keys.size-1 #6
@@ -273,7 +278,7 @@ vols_list.each_key do |fname|
 			new_vols_with_indic[sample_list[fname][0]] << final_vol
 		end
 	else
-		summary_sheet.add_row [sample_list[fname][0], sample_names[fname_id], vols_list[fname].map { |i| i.round(2) }].flatten, :style => data
+		summary_sheet.add_row [sample_list[fname][0], fname, vols_list[fname].map { |i| i.round(2) }].flatten, :style => data
 	end
 end
 
@@ -287,6 +292,7 @@ if set_indicator == true
 
 	new_vols_with_indic.each_key do |sample|
 		# sample_3pos = sprintf '%03d', sample
+				
 		final_sheet.add_row [sample, sample_names[sample], treatments[sample], new_vols_with_indic[sample].map { |i| i }].flatten, :style => data
 	end
 end
