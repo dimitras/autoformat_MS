@@ -20,7 +20,6 @@ dict_list = Hash.new { |h,k| h[k] = [] }
 raw_files = Hash.new { |h,k| h[k] = [] }
 compounds = {}
 Dir["#{mydir}*.txt"].each do |ifile|
-	# puts ifile
 	filename = nil
 	# system 'dos2unix #{ifile}'
 	txt_rows = File.readlines(ifile, {:col_sep => "\t"})
@@ -28,6 +27,7 @@ Dir["#{mydir}*.txt"].each do |ifile|
 		filename = ifile.split("/")[-1].split(".txt")[0]
 		txt_rows.each do |row|
 			cols = row.split("\t")
+			cols[-1] = cols[-1].split("\r\n")[0]
 			raw_files[filename] << cols
 			cols.to_csv
 			csv << cols
@@ -54,7 +54,7 @@ Dir["#{mydir}*.txt"].each do |ifile|
 			end
 		end
 		
-		if in_even_compound == true
+		if in_even_compound == true && !row.empty?
 			if row[1] && row[1] == "Name"
 				for i in 1..row.length-1
 					if row[i] == "Name"
@@ -68,7 +68,7 @@ Dir["#{mydir}*.txt"].each do |ifile|
 					end
 				end
 				next
-			elsif (row[0] != "")
+			elsif (row[0] != "") && (row[1] != "")
 				dict_list[compound_name] << [row[fields["Name"]], row[fields["Area"]], row[fields["IS Area"]], row[fields["Std. Conc"]]]
 			end
 		elsif in_even_compound == false
@@ -166,16 +166,13 @@ results_wb = results_xlsx.workbook
 title = results_wb.styles.add_style(:b => true, :alignment=>{:horizontal => :center})
 data = results_wb.styles.add_style(:alignment=>{:horizontal => :left})
 
-# create compound sheets
-raw_files.each_key do |raw_file|
-	results_wb.add_worksheet(:name => "#{raw_file}") do |sheet|
-		raw_files[raw_file].each do |row|
-			sheet.add_row row
-		end
-	end
+# precreate the summary and final sheets, to be the first two sheets
+if set_indicator == true
+	final_sheet = results_wb.add_worksheet(:name => "Final")
 end
+summary_sheet = results_wb.add_worksheet(:name => "Summary")
 
-
+# create compound sheets
 vols_list = Hash.new { |h,k| h[k] = [] }
 sample_list = Hash.new { |h,k| h[k] = [] }
 fnames_by_sample = {}
@@ -191,11 +188,20 @@ dict_list.each_key do |compound|
 			fname = sample_arr[0]
 			sample = fname.split("_")[-1]
 			if !sample.include? "RC"
-				sample = sample.gsub(/[^\d]/,'')
+				if sample =~ /\d/
+					sample = sample.gsub(/[^\d]/,'')
+					# p "HERE #{fname} >> #{sample}"
+				else
+					# p "BEFORE #{fname} >> #{sample}"
+					sample = fname.split("_")[-2].sub(/[^\d]/,'')
+					# p "THERE #{fname} >> #{sample}"
+				end
 			end
+			
 			if sample.start_with? "0"
 				sample = sample.sub(/^[0]*/,'')
 			end
+
 			spike = sample_arr[3].to_f
 
 			if volumes.has_key?(sample)
@@ -209,13 +215,13 @@ dict_list.each_key do |compound|
 				if sample_arr[1]!="" && sample_arr[2]!=""
 					e_area = sample_arr[1].to_f
 					s_area = sample_arr[2].to_f
-					bias = (e_area/s_area).round(5)
+					bias = e_area/s_area
 				else
 					s_area = sample_arr[2]
 					e_area = ""
 					bias = 0
 				end
-				endo_spike_ratio = bias
+				endo_spike_ratio = bias.round(5)
 				f_vol = ""
 				sheet.add_row [sample, fname, spike, vol, e_area, s_area, endo_spike_ratio, f_vol], :style => data
 				next
@@ -227,9 +233,8 @@ dict_list.each_key do |compound|
 					s_area = sample_arr[2].to_f
 					endo_spike_ratio = e_area/(s_area-bias)
 					if vol != "" && vol && !vol.nil?
-						f_vol = ((spike * endo_spike_ratio) / vol).round(2)
+						f_vol = spike * endo_spike_ratio / vol
 					end
-					endo_spike_ratio = endo_spike_ratio.round(5)
 					p sample if f_vol.nil?
 				else
 					s_area = sample_arr[2]
@@ -237,11 +242,25 @@ dict_list.each_key do |compound|
 					endo_spike_ratio = 0
 					f_vol = 0
 				end
-				sheet.add_row [sample, fname, spike, vol, e_area, s_area, endo_spike_ratio, f_vol], :style => data
-				vols_list[fname] << f_vol
-				sample_list[fname] << sample
+				sheet.add_row [sample, fname, spike, vol, e_area, s_area, endo_spike_ratio.round(5), f_vol.round(2)], :style => data
+				vols_list[sample] << f_vol
+				sample_list[sample] << sample
 				fnames_by_sample[sample] = fname
 			end
+		end
+	end
+end
+
+#create raw compound sheets
+raw_files.each_key do |raw_file|
+	if raw_file.size > 30
+		raw_file_tmp = raw_file.split(//).last(30).join("").to_s
+	else
+		raw_file_tmp = raw_file
+	end
+	results_wb.add_worksheet(:name => raw_file_tmp) do |sheet|	
+		raw_files[raw_file].each do |row|
+			sheet.add_row row
 		end
 	end
 end
@@ -252,7 +271,7 @@ start2 = stop1 + 2 #8
 stop2 = start2 + compounds.keys.size - 1 #12
 new_vols_with_indic = Hash.new { |h,k| h[k] = [] }
 
-summary_sheet = results_wb.add_worksheet(:name => "Summary")
+# summary_sheet = results_wb.add_worksheet(:name => "Summary")
 if set_indicator == true
 	summary_sheet.add_row ["","",(0..compounds.keys.size-1).map{|i| "ng/ml"},"",(0..compounds.keys.size-1).map{|i| "ng/mg #{indicator}"}].flatten, :style => title
 	summary_sheet.merge_cells summary_sheet.rows.first.cells[(2..stop1)]
@@ -264,28 +283,28 @@ else
 	summary_sheet.add_row ["Sample #","ID",dict_list.keys].flatten, :style => title
 end
 
-vols_list.each_key do |fname|
-	fname_id = fname.split("_")[-1].gsub(/[^0-9]/i, '').sub(/^[0]*/,'').to_i
-	if set_indicator == true && indicator_samples.has_key?(fname_id) 
-		indicator_vol = indicator_volumes[fname_id][1]
-		summary_sheet.add_row [sample_list[fname][0], sample_names[fname_id.to_s], vols_list[fname].map { |i| i.round(2) }, indicator_vol.round(2), vols_list[fname].map { |i| (i*100/indicator_vol).round(2) }].flatten, :style => data
-		vols_list[fname].each do |i|
+vols_list.each_key do |sample|
+	# fname_id = sample.split("_")[-1].gsub(/[^0-9]/i, '').sub(/^[0]*/,'').to_i
+	if set_indicator == true && indicator_samples.has_key?(sample.to_i) 
+		indicator_vol = indicator_volumes[sample.to_i][1]
+		summary_sheet.add_row [sample_list[sample][0], fnames_by_sample[sample.to_s], vols_list[sample].map { |i| i.round(2) }, indicator_vol.round(2), vols_list[sample].map { |i| (i*100/indicator_vol).round(2) }].flatten, :style => data
+		vols_list[sample].each do |i|
 			if (i*100/indicator_vol) < 0
 				final_vol = "BLQ"
 			else
 				final_vol = (i*100/indicator_vol).round(2)
 			end
-			new_vols_with_indic[sample_list[fname][0]] << final_vol
+			new_vols_with_indic[sample_list[sample][0]] << final_vol
 		end
 	else
-		summary_sheet.add_row [sample_list[fname][0], fname, vols_list[fname].map { |i| i.round(2) }].flatten, :style => data
+		summary_sheet.add_row [sample_list[sample][0], fnames_by_sample[sample.to_s], vols_list[sample].map { |i| i.round(2) }].flatten, :style => data
 	end
 end
 
 
 # create final table if indicator is set
 if set_indicator == true
-	final_sheet = results_wb.add_worksheet(:name => "Final")
+	# final_sheet = results_wb.add_worksheet(:name => "Final")
 	final_sheet.add_row ["","","",(0..compounds.keys.size-1).map{|i| "ng/ml #{indicator}"}].flatten, :style => title
 	final_sheet.merge_cells final_sheet.rows.first.cells[(3..3+compounds.keys.size-1)]
 	final_sheet.add_row ["Sample #","ID","Treatment",dict_list.keys].flatten, :style => title, :widths => [:auto]
@@ -296,7 +315,6 @@ if set_indicator == true
 		final_sheet.add_row [sample, sample_names[sample], treatments[sample], new_vols_with_indic[sample].map { |i| i }].flatten, :style => data
 	end
 end
-
 
 # write xlsx file
 results_xlsx.serialize(ofile)
