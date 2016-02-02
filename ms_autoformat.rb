@@ -1,5 +1,6 @@
 # USAGE:
 # ruby ms_autoformat.rb test2/ VOLUMES.xlsx CONTROL.xlsx "creatinine"
+# ruby ms_autoformat.rb test2/ VOLUMES.xlsx # if no indicator
 
 require 'rubygems'
 require 'csv'
@@ -160,7 +161,8 @@ end
 
 
 # output
-ofile = "#{mydir}/data.xlsx"
+dir_name = mydir.split("/")[0]
+ofile = "#{mydir}/#{dir_name}_DATA.xlsx"
 results_xlsx = Axlsx::Package.new
 results_wb = results_xlsx.workbook
 title = results_wb.styles.add_style(:b => true, :alignment=>{:horizontal => :center})
@@ -178,7 +180,7 @@ sample_list = Hash.new { |h,k| h[k] = [] }
 fnames_by_sample = {}
 dict_list.each_key do |compound|
 	results_wb.add_worksheet(:name => compound) do |sheet|
-		sheet.add_row ["Sample #","File Name","Spike (ng)","Vol (ml)","Endogenous Area","Spike Area","Endog/Spike","ng/ml"], :style => title
+		sheet.add_row ["Sample #","File Name","Spike (ng)","Vol (ml)","Endogenous Area","Spike Area","Endog/Spike-RC","ng/ml"], :style => title
 
 		bias = nil
 		bias_set = false
@@ -231,7 +233,7 @@ dict_list.each_key do |compound|
 				if sample_arr[1]!="" && sample_arr[2]!=""
 					e_area = sample_arr[1].to_f
 					s_area = sample_arr[2].to_f
-					endo_spike_ratio = e_area/(s_area-bias)
+					endo_spike_ratio = (e_area/s_area)-bias
 					if vol != "" && vol && !vol.nil?
 						f_vol = spike * endo_spike_ratio / vol
 					end
