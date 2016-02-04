@@ -90,6 +90,7 @@ end
 workbook = RubyXL::Parser.parse(vols_file)
 volumes = {}
 sample_names = {}
+subject_names = {}
 treatments = {}
 worksheet1 = workbook[0]
 worksheet1.each do |row|
@@ -102,7 +103,8 @@ worksheet1.each do |row|
 				key_id = id.gsub(/[^\d]/,'')
 				volumes[key_id] = row[2].value
 				sample_names[key_id] = row[1].value
-				treatments[key_id] = row[3].value if row[3]
+				subject_names[key_id] = row[3].value
+				treatments[key_id] = row[4].value if row[4]
 			end
 		end
 	end
@@ -282,7 +284,7 @@ if set_indicator == true
 else
 	summary_sheet.add_row ["","",(0..compounds.keys.size-1).map{|i| "ng/ml"}].flatten, :style => title, :widths => [:auto]
 	summary_sheet.merge_cells summary_sheet.rows.first.cells[(2..stop1)]
-	summary_sheet.add_row ["Sample #","ID",dict_list.keys].flatten, :style => title
+	summary_sheet.add_row ["Sample #","ID","Subject id",dict_list.keys].flatten, :style => title
 end
 
 vols_list.each_key do |sample|
@@ -299,7 +301,7 @@ vols_list.each_key do |sample|
 			new_vols_with_indic[sample_list[sample][0]] << final_vol
 		end
 	else
-		summary_sheet.add_row [sample_list[sample][0], fnames_by_sample[sample.to_s], vols_list[sample].map { |i| i.round(2) }].flatten, :style => data
+		summary_sheet.add_row [sample_list[sample][0], fnames_by_sample[sample.to_s], sample_names[sample_list[sample][0]], vols_list[sample].map { |i| i.round(2) }].flatten, :style => data
 	end
 end
 
@@ -309,12 +311,12 @@ if set_indicator == true
 	# final_sheet = results_wb.add_worksheet(:name => "Final")
 	final_sheet.add_row ["","","",(0..compounds.keys.size-1).map{|i| "ng/ml #{indicator}"}].flatten, :style => title
 	final_sheet.merge_cells final_sheet.rows.first.cells[(3..3+compounds.keys.size-1)]
-	final_sheet.add_row ["Sample #","ID","Treatment",dict_list.keys].flatten, :style => title, :widths => [:auto]
+	final_sheet.add_row ["Sample #","ID","Subject id","Treatment",dict_list.keys].flatten, :style => title, :widths => [:auto]
 
 	new_vols_with_indic.each_key do |sample|
 		# sample_3pos = sprintf '%03d', sample
 				
-		final_sheet.add_row [sample, sample_names[sample], treatments[sample], new_vols_with_indic[sample].map { |i| i }].flatten, :style => data
+		final_sheet.add_row [sample, sample_names[sample], subject_names[sample], treatments[sample], new_vols_with_indic[sample].map { |i| i }].flatten, :style => data
 	end
 end
 
